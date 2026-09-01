@@ -1,0 +1,66 @@
+name: Pure Single Web File to Android APK Engine
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Get Source Web Code File
+      uses: actions/checkout@v4
+
+    - name: Set up Cloud Node Environment
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Initialize Dynamic Package Management
+      run: |
+        npm init -y
+        npm install @capacitor/core @capacitor/cli
+
+    - name: Build Capacitor Manifest Config
+      run: |
+        npx cap init "My Single App" "com.example.singleapp" --web-dir=.
+
+    - name: Bind Core Native Android Platform Architecture
+      run: |
+        npm install @capacitor/android
+        npx cap add android
+
+    - name: Inject Secure Camera and File Core Permissions
+      run: |
+        MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+        sed -i '/<\/manifest>/i \    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' $MANIFEST_PATH
+
+    - name: Install Android Hardware Camera SDK Support Config
+      run: |
+        npm install @capacitor/camera @capacitor/filesystem
+        npx cap sync android
+
+    - name: Setup Compiler Java Environment (JDK 17)
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'
+        java-version: '17'
+
+    - name: Deploy Google Android Command SDK Tools
+      uses: android-actions/setup-android@v3
+
+    - name: Final Code Compression Android Build Run
+      run: |
+        cd android
+        chmod +x gradlew
+        ./gradlew assembleDebug
+
+    - name: Release Download Link Generation
+      uses: actions/upload-artifact@v4
+      with:
+        name: complete-android-apk-package
+        path: android/app/build/outputs/apk/debug/app-debug.apk
+        
