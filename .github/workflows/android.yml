@@ -1,4 +1,4 @@
-name: Pure Single Web File to Android APK Engine
+name: Generate Android APK Safely
 
 on:
   push:
@@ -11,34 +11,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Get Source Web Code File
+    - name: Checkout Source Web Code
       uses: actions/checkout@v4
 
-    - name: Set up Cloud Node Environment
+    - name: Set up Node.js Env
       uses: actions/setup-node@v4
       with:
         node-version: 20
 
-    - name: Initialize Dynamic Package Management
+    - name: Initialize App Framework Packages
       run: |
         npm init -y
         npm install @capacitor/core @capacitor/cli
 
-    - name: Build Capacitor Manifest Config
+    - name: Build Capacitor Manifest Configuration
       run: |
-        npx cap init "My Single App" "com.example.singleapp" --web-dir=.
+        npx cap init "My App" "com.example.myapp" --web-dir=. --confirm
 
-    - name: Bind Core Native Android Platform Architecture
+    - name: Bind Core Native Android Platform
       run: |
         npm install @capacitor/android
         npx cap add android
 
-    - name: Inject Secure Camera and File Core Permissions
+    - name: Inject Secure Camera and File Permissions
       run: |
         MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
-        sed -i '/<\/manifest>/i \    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' $MANIFEST_PATH
+        if [ -f "$MANIFEST_PATH" ]; then
+          sed -i '/<\/manifest>/i \    <uses-permission android:name="android.permission.CAMERA" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />' $MANIFEST_PATH
+        fi
 
-    - name: Install Android Hardware Camera SDK Support Config
+    - name: Install Android Hardware Camera Support Plugins
       run: |
         npm install @capacitor/camera @capacitor/filesystem
         npx cap sync android
@@ -52,10 +54,14 @@ jobs:
     - name: Deploy Google Android Command SDK Tools
       uses: android-actions/setup-android@v3
 
-    - name: Final Code Compression Android Build Run
+    - name: Grant Execute Permission for Gradle
       run: |
         cd android
         chmod +x gradlew
+
+    - name: Final Code Compilation Android Build Run
+      run: |
+        cd android
         ./gradlew assembleDebug
 
     - name: Release Download Link Generation
@@ -63,4 +69,3 @@ jobs:
       with:
         name: complete-android-apk-package
         path: android/app/build/outputs/apk/debug/app-debug.apk
-        
