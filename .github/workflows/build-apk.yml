@@ -30,9 +30,69 @@ jobs:
           path = "android/app/src/main/AndroidManifest.xml"
           with open(path) as f:
               content = f.read()
-          perm = '<uses-permission android:name="android.permission.CAMERA" />\n'
-          if 'android.permission.CAMERA' not in content:
-              content = content.replace('</manifest>', f'    {perm}</manifest>')
+          perms = [
+              '<uses-permission android:name="android.permission.CAMERA" />\n',
+              '<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n',
+              '<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />\n',
+          ]
+          for perm in perms:
+              name = perm.split('"')[1]
+              if name not in content:
+                  content = content.replace('</manifest>', f'    {perm}</manifest>')
+          with open(path, 'w') as f:
+              f.write(content)
+          EOF
+
+      - name: Register as an external "Capture Image" target
+        run: |
+          mkdir -p android/app/src/main/java/com/duallens/camera
+          cp native-patches/CaptureBridgePlugin.java android/app/src/main/java/com/duallens/camera/CaptureBridgePlugin.java
+          python3 - <<'EOF'
+          import re
+          path = "android/app/src/main/java/com/duallens/camera/MainActivity.java"
+          with open(path) as f:
+              content = f.read()
+
+          if 'registerPlugin(CaptureBridgePlugin.class)' not in content:
+              if re.search(r'void\s+onCreate\s*\(', content):
+                  # There's already an onCreate — register the plugin as its first line.
+                  content = re.sub(
+                      r'(void\s+onCreate\s*\([^)]*\)\s*\{)',
+                      r'\1\n        registerPlugin(CaptureBridgePlugin.class);',
+                      content, count=1
+                  )
+              else:
+                  # No onCreate yet — generate the whole file fresh.
+                  content = (
+                      "package com.duallens.camera;\n\n"
+                      "import android.os.Bundle;\n"
+                      "import com.getcapacitor.BridgeActivity;\n\n"
+                      "public class MainActivity extends BridgeActivity {\n"
+                      "    @Override\n"
+                      "    public void onCreate(Bundle savedInstanceState) {\n"
+                      "        registerPlugin(CaptureBridgePlugin.class);\n"
+                      "        super.onCreate(savedInstanceState);\n"
+                      "    }\n"
+                      "}\n"
+                  )
+              if 'import android.os.Bundle;' not in content:
+                  content = content.replace('package com.duallens.camera;\n', 'package com.duallens.camera;\n\nimport android.os.Bundle;\n', 1)
+
+          with open(path, 'w') as f:
+              f.write(content)
+          EOF
+          python3 - <<'EOF'
+          path = "android/app/src/main/AndroidManifest.xml"
+          with open(path) as f:
+              content = f.read()
+          extra_filter = (
+              '<intent-filter>\n'
+              '                <action android:name="android.media.action.IMAGE_CAPTURE" />\n'
+              '                <category android:name="android.intent.category.DEFAULT" />\n'
+              '            </intent-filter>\n'
+          )
+          if 'IMAGE_CAPTURE' not in content:
+              content = content.replace('</activity>', f'    {extra_filter}</activity>', 1)
           with open(path, 'w') as f:
               f.write(content)
           EOF
