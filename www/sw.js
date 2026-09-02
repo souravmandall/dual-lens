@@ -1,4 +1,4 @@
-const CACHE = 'dual-lens-v1';
+const CACHE = 'dual-lens-v6';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
