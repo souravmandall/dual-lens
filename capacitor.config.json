@@ -1,0 +1,6 @@
+{
+  "appId": "com.duallens.camera",
+  "appName": "Dual Lens",
+  "webDir": "www",
+  "bundledWebRuntime": false
+}
