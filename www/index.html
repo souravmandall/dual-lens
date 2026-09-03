@@ -153,6 +153,7 @@
   #crop-modal.show{ display:flex; }
   #crop-stage{ position:relative; max-width:94vw; max-height:70vh; touch-action:none; line-height:0; }
   #crop-img{ display:block; max-width:94vw; max-height:70vh; -webkit-user-drag:none; user-select:none; }
+  #crop-rect{ transition:opacity .1s ease; }
   #crop-rect{ position:absolute; border:2px solid var(--amber); background:rgba(224,167,94,0.14); box-sizing:border-box; }
   .crop-handle{ position:absolute; width:26px; height:26px; margin:-13px; border-radius:50%; background:var(--amber); border:2px solid #12151a; touch-action:none; box-shadow:0 2px 6px rgba(0,0,0,0.5); }
   #crop-h-tl{ top:0; left:0; cursor:nwse-resize; }
@@ -321,7 +322,7 @@
 
   <div id="crop-modal">
     <div id="crop-stage">
-      <img id="crop-img" alt="crop preview" draggable="false">
+      <canvas id="crop-canvas"></canvas>
       <div id="crop-rect">
         <div class="crop-handle" id="crop-h-tl" data-corner="tl"></div>
         <div class="crop-handle" id="crop-h-tr" data-corner="tr"></div>
@@ -928,6 +929,17 @@
     return out;
   }
 
+  function makePreviewCanvas(srcCanvas, maxDim){
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    if(scale >= 1) return srcCanvas;
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(w*scale));
+    out.height = Math.max(1, Math.round(h*scale));
+    out.getContext('2d').drawImage(srcCanvas, 0, 0, out.width, out.height);
+    return out;
+  }
+
   function openCropScreen(canvasEl){
     return new Promise((resolve)=>{
       const modal = document.getElementById('crop-modal');
@@ -936,36 +948,72 @@
       const slider = document.getElementById('crop-rotate-slider');
       const valueLabel = document.getElementById('crop-rotate-value');
 
+      // Live rotation/preview works on a small downscaled copy so dragging the
+      // slider stays smooth. Full-resolution rotation only happens once, on Save.
+      const previewSrc = makePreviewCanvas(canvasEl, 900);
+
       let rotateDeg = 0;
-      let workingCanvas = canvasEl; // the (possibly rotated) canvas currently shown & cropped from
+      let workingPreview = previewSrc; // the (possibly rotated) small canvas currently shown & used for the crop rect
+      let commitTimer = null;
 
-      let autoPct;
-      try{ autoPct = autoDetectCropRect(canvasEl); }
-      catch(e){ autoPct = { x0:0.04, y0:0.04, x1:0.96, y1:0.96 }; }
-
-      function applyAuto(){ cropRectPct = { ...autoPct }; updateCropRectVisual(); }
+      function applyAuto(){
+        let autoPct;
+        try{ autoPct = autoDetectCropRect(workingPreview); }
+        catch(e){ autoPct = { x0:0.04, y0:0.04, x1:0.96, y1:0.96 }; }
+        cropRectPct = autoPct;
+        updateCropRectVisual();
+      }
 
       function renderWorkingImage(keepSelection){
-        workingCanvas = rotateDeg === 0 ? canvasEl : rotateCanvas(canvasEl, rotateDeg);
+        workingPreview = rotateDeg === 0 ? previewSrc : rotateCanvas(previewSrc, rotateDeg);
         img.onload = ()=>{ if(keepSelection) updateCropRectVisual(); else applyAuto(); };
-        img.src = workingCanvas.toDataURL('image/jpeg', 0.92);
+        img.src = workingPreview.toDataURL('image/jpeg', 0.85);
         if(img.complete && img.src) { if(keepSelection) updateCropRectVisual(); else applyAuto(); }
       }
 
       renderWorkingImage(false); // initial render: angle 0, run auto-detect
       modal.classList.add('show');
 
+      const rectEl = document.getElementById('crop-rect');
+
+      // While dragging the slider we only move the image with a cheap CSS
+      // transform (no canvas rotate/encode), which stays perfectly smooth.
+      // The real pixel rotation + crop-rect placement is committed a moment
+      // after the user stops moving the slider.
+      function liveRotatePreview(deg){
+        img.style.transform = 'rotate(' + deg + 'deg)';
+        rectEl.style.opacity = '0';
+      }
+
+      function commitRotation(keepSelection){
+        img.style.transform = 'none';
+        renderWorkingImage(keepSelection);
+        rectEl.style.opacity = '1';
+      }
+
+      function scheduleCommit(keepSelection){
+        if(commitTimer) clearTimeout(commitTimer);
+        commitTimer = setTimeout(()=>{ commitTimer=null; commitRotation(keepSelection); }, 120);
+      }
+
       slider.value = '0';
       valueLabel.textContent = '0°';
-      function setRotate(deg){
+      function setRotate(deg, immediate){
         rotateDeg = Math.max(-45, Math.min(45, deg));
         slider.value = String(rotateDeg);
         valueLabel.textContent = rotateDeg + '°';
-        renderWorkingImage(true); // keep the current crop selection, just re-render the image beneath it
+        if(immediate){
+          if(commitTimer){ clearTimeout(commitTimer); commitTimer=null; }
+          commitRotation(true);
+        } else {
+          liveRotatePreview(rotateDeg);
+          scheduleCommit(true); // keep the current crop selection once it settles
+        }
       }
-      slider.oninput = ()=> setRotate(parseFloat(slider.value));
-      document.getElementById('crop-rotate-minus').onclick = ()=> setRotate(rotateDeg - 1);
-      document.getElementById('crop-rotate-plus').onclick = ()=> setRotate(rotateDeg + 1);
+      slider.oninput = ()=> setRotate(parseFloat(slider.value), false);
+      slider.onchange = ()=> setRotate(parseFloat(slider.value), true); // fires on release — commit right away
+      document.getElementById('crop-rotate-minus').onclick = ()=> setRotate(rotateDeg - 1, true);
+      document.getElementById('crop-rotate-plus').onclick = ()=> setRotate(rotateDeg + 1, true);
 
       const MIN = 0.06;
       function clamp01(v){ return Math.max(0, Math.min(1, v)); }
@@ -990,24 +1038,28 @@
       window.addEventListener('pointerup', onPointerUp);
 
       function finish(result){
+        if(commitTimer){ clearTimeout(commitTimer); commitTimer=null; }
+        img.style.transform = 'none';
         modal.classList.remove('show');
         img.onload = null;
         slider.oninput = null;
+        slider.onchange = null;
         stage.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerup', onPointerUp);
         resolve(result);
       }
 
-      document.getElementById('crop-reset-btn').onclick = ()=>{ setRotate(0); applyAuto(); };
+      document.getElementById('crop-reset-btn').onclick = ()=>{ setRotate(0, true); applyAuto(); };
       document.getElementById('crop-cancel-btn').onclick = ()=> finish(null);
       document.getElementById('crop-save-btn').onclick = ()=>{
-        // Crop out of the ROTATED working canvas, so the saved image is straightened.
+        // Only now do we rotate the FULL-resolution image, once, and crop out of that.
         const r = cropRectPct;
-        const px = Math.round(r.x0*workingCanvas.width), py = Math.round(r.y0*workingCanvas.height);
-        const pw = Math.round((r.x1-r.x0)*workingCanvas.width), ph = Math.round((r.y1-r.y0)*workingCanvas.height);
+        const fullRotated = rotateDeg === 0 ? canvasEl : rotateCanvas(canvasEl, rotateDeg);
+        const px = Math.round(r.x0*fullRotated.width), py = Math.round(r.y0*fullRotated.height);
+        const pw = Math.round((r.x1-r.x0)*fullRotated.width), ph = Math.round((r.y1-r.y0)*fullRotated.height);
         const out = document.createElement('canvas');
         out.width = pw; out.height = ph;
-        out.getContext('2d').drawImage(workingCanvas, px, py, pw, ph, 0, 0, pw, ph);
+        out.getContext('2d').drawImage(fullRotated, px, py, pw, ph, 0, 0, pw, ph);
         finish(out);
       };
     });
