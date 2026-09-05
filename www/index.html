@@ -1,0 +1,1353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Dual Lens</title>
+<meta name="theme-color" content="#12151a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<script src="vendor/jspdf.umd.min.js"></script>
+<script src="vendor/capacitor.js"></script>
+<script src="vendor/capacitor-filesystem.js"></script>
+<style>
+  :root{
+    --bg:#12151a; --panel:#1b1f26; --panel-2:#232833; --hairline:rgba(255,255,255,0.08);
+    --ink:#20242c; --ink-dim:rgba(32,36,44,0.62);
+    --amber:#e0a75e; --amber-dim:#8a6a3d; --teal:#4db6ac; --text:#f3efe6; --muted:#9099a6;
+    --font-display:'Sora',sans-serif; --font-body:'Inter',sans-serif; --font-mono:'JetBrains Mono',monospace;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; height:100%; background:var(--bg); color:var(--text); font-family:var(--font-body); overflow:hidden; -webkit-tap-highlight-color:transparent; }
+  #app{ position:relative; width:100%; height:100vh; height:100dvh; background:#000; overflow:hidden; }
+
+  #viewfinder-wrap{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#000; }
+  video{ width:100%; height:100%; object-fit:cover; transition:transform .12s ease, opacity .3s ease; opacity:0; background:#000; will-change:transform, opacity; }
+  video.ready{ opacity:1; }
+  #permission-screen{ position:absolute; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:32px; text-align:center; background:radial-gradient(ellipse at 50% 30%, #1c2129 0%, #0c0e12 75%); z-index:9; }
+  #permission-screen.show{ display:flex; animation:fadeIn .4s ease; }
+  #permission-screen svg{ width:52px; height:52px; stroke:var(--amber); animation:breathe 2.4s ease-in-out infinite; }
+  #permission-screen h2{ font-family:var(--font-display); font-weight:700; font-size:19px; margin:0; }
+  #permission-screen p{ color:var(--muted); font-size:13px; max-width:260px; line-height:1.5; margin:0; }
+  #permission-screen button{ margin-top:4px; padding:12px 26px; border-radius:999px; border:1px solid var(--amber); background:var(--amber); color:#1a1305; font-weight:600; font-family:var(--font-body); font-size:13.5px; cursor:pointer; transition:transform .15s ease; }
+  #permission-screen button:active{ transform:scale(.94); }
+  @keyframes breathe{ 0%,100%{ transform:scale(1); opacity:1;} 50%{ transform:scale(1.08); opacity:.75; } }
+  @keyframes fadeIn{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+
+  #aspect-guide{ position:absolute; top:max(16px, env(safe-area-inset-top)); bottom:var(--bottom-reserve, 150px); left:0; right:0; margin:auto; pointer-events:none; border:1.5px dashed rgba(224,167,94,0.55); box-sizing:border-box; border-radius:6px; aspect-ratio: var(--ar, 1.777); width:min(94%, calc((100dvh - max(16px, env(safe-area-inset-top)) - var(--bottom-reserve, 150px)) * var(--ar, 1.777))); height:min(calc(100dvh - max(16px, env(safe-area-inset-top)) - var(--bottom-reserve, 150px)), calc(94vw / var(--ar, 1.777))); transition: aspect-ratio .3s ease, opacity .25s ease; }
+
+  #split-guide{ position:absolute; inset:0; pointer-events:none; display:none; flex-direction:column; }
+
+  #grid-lines{ position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .2s ease; }
+  #grid-lines.show{ opacity:1; }
+  .grid-line{ position:absolute; background:rgba(255,255,255,0.4); box-shadow:0 0 2px rgba(0,0,0,0.5); }
+  .grid-line.v{ top:0; bottom:0; width:1px; }
+  .grid-line.h{ left:0; right:0; height:1px; }
+
+  #level-indicator{ position:absolute; top:0; bottom:var(--bottom-reserve, 150px); left:0; right:0; margin:auto; width:96px; height:96px; display:none; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
+  #level-indicator.show{ display:flex; }
+  #level-degree{ position:absolute; top:-38px; font-family:var(--font-mono); font-size:15px; font-weight:600; color:#fff; text-shadow:0 1px 6px rgba(0,0,0,0.7); transition:color .2s ease; }
+  #level-ring{ width:72px; height:72px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.55); box-shadow:0 0 10px rgba(0,0,0,0.4); position:relative; transition:border-color .2s ease; }
+  #level-dot{ position:absolute; top:50%; left:50%; width:20px; height:20px; margin:-10px; border-radius:50%; border:2px solid #9099a6; transition:border-color .2s ease, transform .08s linear; }
+  #level-indicator.level #level-ring{ border-color:rgba(96,222,120,0.85); }
+  #level-indicator.level #level-dot{ border-color:#5fe07a; box-shadow:0 0 10px rgba(95,224,122,0.6); }
+  #level-indicator.level #level-degree{ color:#5fe07a; }
+  #level-indicator.tilted #level-dot{ border-color:#ef5a5a; box-shadow:0 0 10px rgba(239,90,90,0.5); }
+  #level-indicator.tilted #level-degree{ color:#ef5a5a; }
+  #split-guide.active{ display:flex; }
+  .split-half{ flex:1; position:relative; border:2px solid rgba(224,167,94,0); transition:border-color .3s ease; overflow:hidden; }
+  .split-half.pending{ border-color:rgba(224,167,94,0.55); }
+  .split-half.done{ border-color:rgba(77,182,172,0.7); }
+  .split-half .half-label{ position:absolute; top:10px; right:10px; font-family:var(--font-mono); font-size:10px; letter-spacing:.06em; color:rgba(255,255,255,0.7); background:rgba(0,0,0,0.4); padding:3px 7px; border-radius:6px; }
+  #split-divider{ position:absolute; left:0; right:0; top:50%; height:1px; background:rgba(255,255,255,0.25); }
+  .half-thumb{ position:absolute; inset:0; background-size:cover; background-position:center; opacity:0; transform:scale(1.04); transition:opacity .3s ease, transform .3s ease; }
+  .half-thumb.show{ opacity:0.85; transform:scale(1); }
+
+  #flash{ position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; }
+  .flash-play{ animation:flashPop .35s ease-out; }
+  @keyframes flashPop{ 0%{opacity:.9;} 100%{opacity:0;} }
+
+  #settings-toggle{ width:52px; height:52px; border-radius:16px; background:rgba(27,31,38,0.72); backdrop-filter:blur(14px); border:1px solid var(--hairline); display:none; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,0.4); flex-shrink:0; transition:transform .15s ease; }
+  #settings-toggle:active{ transform:scale(.92); }
+  #settings-toggle svg{ width:19px; height:19px; stroke:var(--amber); transition:transform .3s cubic-bezier(.4,0,.2,1); }
+  #settings-toggle.open svg{ transform:rotate(180deg); }
+
+  #topbar{ position:absolute; top:0; left:0; right:0; padding:max(14px, env(safe-area-inset-top)) 14px 0 14px; display:flex; flex-direction:column; gap:8px; z-index:5; opacity:0; transform:translateY(-10px) scale(.98); pointer-events:none; transition:opacity .2s cubic-bezier(.2,.8,.2,1), transform .2s cubic-bezier(.2,.8,.2,1); transform-origin:top right; will-change:opacity, transform; }
+  #topbar.open{ opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+  .pill-row{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .group-label{ display:flex; align-items:center; gap:6px; font-family:var(--font-mono); font-size:10px; font-weight:500; letter-spacing:.16em; text-transform:uppercase; color:var(--ink-dim); padding-left:2px; margin-top:14px; }
+  .group-label:first-child{ margin-top:0; }
+  .group-label svg{ width:12px; height:12px; stroke:var(--amber); opacity:.85; flex-shrink:0; }
+  .pill{ display:flex; align-items:center; gap:8px; background:rgba(255,255,255,0.32); backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); -webkit-backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); border:1px solid rgba(255,255,255,0.55); border-top-color:rgba(255,255,255,0.8); border-radius:999px; padding:6px; box-shadow:0 8px 22px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.55); transition:transform .15s ease, box-shadow .15s ease; color:var(--ink); }
+  .pill span, .pill input, .pill select, .pill .fmt-opt{ color:var(--ink); }
+  .pill:active{ transform:scale(.97); box-shadow:0 4px 12px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05); }
+
+  .pill.toggle-single{ border:none; cursor:pointer; font-family:var(--font-body); font-size:11.5px; font-weight:600; letter-spacing:.02em; padding:7px 13px; transition:transform .15s ease, box-shadow .2s ease, background .25s ease, border-color .25s ease, color .25s ease; }
+  .pill.toggle-single svg{ width:14px; height:14px; stroke:currentColor; }
+  .pill.toggle-single.active{ background:rgba(224,167,94,0.28); box-shadow:0 0 0 1.5px rgba(224,167,94,0.6), 0 0 16px rgba(224,167,94,0.4), inset 0 1px 0 rgba(255,255,255,0.4); color:#8a5a1e; }
+
+  .toggle2{ position:relative; cursor:pointer; user-select:none; }
+  .toggle2 .opt{ position:relative; z-index:2; padding:7px 13px; font-size:11.5px; font-weight:600; letter-spacing:.02em; color:var(--ink-dim); border-radius:999px; display:flex; align-items:center; gap:5px; transition:color .25s ease; }
+  .toggle2 .opt.on{ color:#1a1305; }
+  .toggle2 .opt svg{ width:13px; height:13px; }
+  .toggle2-track{ position:relative; display:flex; }
+  .toggle2-thumb{ position:absolute; top:0; bottom:0; left:0; width:50%; border-radius:999px; background:linear-gradient(150deg, #ecb877, var(--amber) 55%, #c68a45); box-shadow:0 2px 8px rgba(224,167,94,0.45), inset 0 1px 0 rgba(255,255,255,0.35); transition:transform .28s cubic-bezier(.65,0,.35,1); z-index:1; }
+  .toggle2-thumb.second{ transform:translateX(100%); }
+
+  #format-pill .fmt-opt{ padding:7px 11px; font-size:11.5px; font-weight:600; font-family:var(--font-mono); color:var(--ink-dim); border-radius:999px; cursor:pointer; transition:all .2s ease; }
+  #format-pill .fmt-opt.active{ background:var(--teal); color:#052422; transform:scale(1.04); }
+
+  #size-pill{ padding:6px 10px; gap:6px; }
+  #size-pill svg{ width:13px; height:13px; stroke:var(--ink-dim); flex-shrink:0; }
+  #size-value{ width:44px; background:transparent; border:none; outline:none; color:var(--ink); font-family:var(--font-mono); font-size:12.5px; font-weight:500; }
+  #size-unit{ background:var(--panel-2); border:1px solid var(--hairline); color:var(--text); font-family:var(--font-mono); font-size:10.5px; border-radius:6px; padding:4px 6px; cursor:pointer; outline:none; }
+
+  #zoom-pill{ padding:6px 10px; gap:6px; }
+  #zoom-pill svg{ width:14px; height:14px; stroke:var(--amber); flex-shrink:0; }
+  #zoom-value{ width:32px; background:transparent; border:none; outline:none; color:var(--ink); font-family:var(--font-mono); font-size:12.5px; font-weight:500; }
+  #zoom-pill .zoom-pct{ font-family:var(--font-mono); font-size:11px; color:var(--ink-dim); }
+
+  #folder-pill{ cursor:pointer; padding:7px 12px; gap:6px; }
+  #folder-pill svg{ width:14px; height:14px; stroke:var(--amber); flex-shrink:0; }
+  #folder-pill span{ font-family:var(--font-mono); font-size:11.5px; color:var(--ink); max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  #res-pill{ cursor:pointer; padding:7px 12px; gap:6px; }
+  #res-pill svg{ width:14px; height:14px; stroke:var(--teal); flex-shrink:0; }
+  #res-pill span{ font-family:var(--font-mono); font-size:11.5px; color:var(--ink); white-space:nowrap; }
+
+  #res-sheet .res-opt{ display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-radius:12px; margin-bottom:8px; background:var(--panel-2); border:1px solid var(--hairline); cursor:pointer; transition:transform .15s ease, border-color .2s ease; }
+  #res-sheet .res-opt:active{ transform:scale(.97); }
+  #res-sheet .res-opt.active{ border-color:var(--amber); background:rgba(224,167,94,0.1); }
+  #res-sheet .res-name{ font-family:var(--font-body); font-size:13.5px; font-weight:600; }
+  #res-sheet .res-dim{ font-family:var(--font-mono); font-size:11.5px; color:var(--muted); }
+  #res-sheet .res-opt.active .res-dim{ color:var(--amber); }
+  #res-sheet .check{ width:16px; height:16px; stroke:var(--amber); opacity:0; flex-shrink:0; margin-left:8px; }
+  #res-sheet .res-opt.active .check{ opacity:1; animation:pop .25s ease; }
+  #res-sheet .res-row{ display:flex; align-items:center; }
+
+  #bottom-controls{ position:absolute; left:0; right:0; bottom:0; z-index:5; display:flex; flex-direction:column; gap:10px; box-sizing:border-box; padding-top:16px; background:linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0)); }
+  #bottombar{ padding:0 clamp(12px,4vw,20px) max(16px, env(safe-area-inset-bottom)) clamp(12px,4vw,20px); display:flex; align-items:center; justify-content:space-between; gap:10px; box-sizing:border-box; opacity:0; transform:translateY(10px); }
+  #quickbar{ padding:0 clamp(12px,4vw,20px); display:flex; gap:10px; box-sizing:border-box; opacity:0; transform:translateY(10px); }
+  #quickbar.in{ animation:slideUp .45s cubic-bezier(.2,.8,.2,1) forwards; animation-delay:.03s; }
+  #bottombar.in{ animation:slideUp .45s cubic-bezier(.2,.8,.2,1) forwards; animation-delay:.08s; }
+  @keyframes slideUp{ to{opacity:1; transform:translateY(0);} }
+  #side-spacer{ width:52px; flex-shrink:0; }
+  #settings-toggle{ flex-shrink:0; }
+
+  .quick-btn{ flex:1; display:flex; align-items:center; justify-content:center; gap:6px; padding:13px 8px; border-radius:16px; background:rgba(255,255,255,0.32); backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); -webkit-backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); border:1px solid rgba(255,255,255,0.55); border-top-color:rgba(255,255,255,0.8); box-shadow:0 8px 22px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.55); color:var(--ink); font-family:var(--font-body); font-size:12.5px; font-weight:600; letter-spacing:.02em; cursor:pointer; transition:transform .15s ease, box-shadow .25s ease, background .25s ease, border-color .25s ease, color .25s ease; }
+  .quick-btn:active{ transform:scale(.94); }
+  .quick-btn svg{ width:16px; height:16px; flex-shrink:0; stroke:currentColor; transition:stroke .25s ease; }
+  #crop-toggle.active{ background:rgba(224,167,94,0.22); border-color:rgba(224,167,94,0.55); border-top-color:rgba(224,167,94,0.75); box-shadow:0 0 0 1px rgba(224,167,94,0.3), 0 0 18px rgba(224,167,94,0.5), inset 0 1px 0 rgba(255,255,255,0.2); color:var(--amber); }  #orient-pill.o-landscape{ color:var(--amber); }
+  #orient-pill.o-landscape svg{ stroke:var(--amber); }
+  #orient-pill.o-portrait{ background:rgba(77,182,172,0.18); border-color:rgba(77,182,172,0.5); border-top-color:rgba(77,182,172,0.68); box-shadow:0 0 0 1px rgba(77,182,172,0.28), 0 0 16px rgba(77,182,172,0.42), inset 0 1px 0 rgba(255,255,255,0.2); color:var(--teal); }
+  #orient-pill.o-portrait svg{ stroke:var(--teal); }
+  #quickbar .toggle2{ flex:1; padding:0; background:rgba(255,255,255,0.32); backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); -webkit-backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); border:1px solid rgba(255,255,255,0.55); border-top-color:rgba(255,255,255,0.8); border-radius:16px; box-shadow:0 8px 22px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.55); }
+  #quickbar .toggle2-track{ display:flex; width:100%; height:100%; }
+  #quickbar .toggle2 .opt{ flex:1; justify-content:center; padding:13px 6px; }
+  #quickbar .toggle2-thumb{ border-radius:16px; }
+
+  #thumb-wrap{ width:52px; height:52px; border-radius:14px; overflow:hidden; border:1.5px solid var(--hairline); background:var(--panel); display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 4px 14px rgba(0,0,0,0.4); position:relative; transition:transform .15s ease; flex-shrink:0; }
+  #thumb-wrap:active{ transform:scale(.92); }
+  #thumb-wrap img{ width:100%; height:100%; object-fit:cover; display:none; }
+  #thumb-wrap.filled img{ display:block; }
+  #thumb-wrap.pop img{ animation:pop .35s cubic-bezier(.34,1.56,.64,1); }
+  @keyframes pop{ 0%{ transform:scale(0.4); opacity:0;} 100%{ transform:scale(1); opacity:1;} }
+  #thumb-wrap .empty-icon{ width:19px; height:19px; stroke:var(--muted); }
+  #thumb-wrap.filled .empty-icon{ display:none; }
+  #thumb-badge{ position:absolute; top:-4px; right:-4px; background:var(--teal); color:#052422; font-size:9px; font-weight:700; font-family:var(--font-mono); border-radius:999px; padding:2px 5px; display:none; }
+  #thumb-badge.show{ display:block; animation:pop .3s ease; }
+
+  #shutter-btn{ width:74px; height:74px; border-radius:50%; border:3px solid rgba(255,255,255,0.85); background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer; position:relative; flex-shrink:0; }
+  #shutter-inner{ width:58px; height:58px; border-radius:50%; background:radial-gradient(circle at 35% 30%, #fff, #d8d8d8 70%); transition:transform .12s ease; }
+  #shutter-btn.double-active #shutter-inner{ background:radial-gradient(circle at 35% 30%, #f3d3a1, var(--amber) 70%); }
+  #shutter-btn:active #shutter-inner{ transform:scale(.86); }
+  #shutter-ring{ position:absolute; inset:-3px; border-radius:50%; border:2px solid var(--amber); opacity:0; }
+  .ring-pulse{ animation:ringPulse .5s ease-out; }
+  @keyframes ringPulse{ 0%{opacity:.9; transform:scale(1);} 100%{opacity:0; transform:scale(1.35);} }
+  #aperture-overlay{ position:absolute; inset:0; border-radius:50%; overflow:hidden; pointer-events:none; opacity:0; }
+  .aperture-play{ animation:apertureSweep .38s ease-in-out; }
+  @keyframes apertureSweep{ 0%{opacity:0;} 35%{opacity:1; background:conic-gradient(#0a0a0a 0deg 340deg, transparent 340deg 360deg);} 100%{opacity:0;} }
+
+  #switch-cam{ width:44px; height:44px; border-radius:50%; background:rgba(255,255,255,0.32); backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); -webkit-backdrop-filter:blur(44px) saturate(2.2) brightness(1.06); border:1px solid rgba(255,255,255,0.55); border-top-color:rgba(255,255,255,0.8); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0; transition:transform .3s ease; box-shadow:0 8px 22px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.55); }
+  #switch-cam:active svg{ transform:rotate(180deg); }
+  #switch-cam svg{ width:19px; height:19px; stroke:var(--ink); transition:transform .3s ease; }
+
+  #preview-modal{ position:absolute; inset:0; background:rgba(8,9,11,0.92); backdrop-filter:blur(6px); z-index:20; display:none; align-items:center; justify-content:center; flex-direction:column; padding:24px; }
+  #preview-modal.open{ display:flex; animation:fadeIn .25s ease; }
+  #preview-img-wrap{ max-width:92%; max-height:60%; border-radius:14px; overflow:hidden; border:1px solid var(--hairline); box-shadow:0 20px 50px rgba(0,0,0,0.5); background:var(--panel); animation:pop .3s cubic-bezier(.34,1.56,.64,1); }
+  #preview-img-wrap img{ display:block; max-width:100%; max-height:60vh; object-fit:contain; }
+  #preview-meta{ font-family:var(--font-mono); font-size:11.5px; color:var(--muted); margin-top:14px; text-align:center; line-height:1.6; }
+  #preview-meta b{ color:var(--amber); }
+  #preview-actions{ display:flex; gap:12px; margin-top:18px; }
+  #preview-actions button, #preview-actions a{ padding:12px 20px; border-radius:999px; font-family:var(--font-body); font-size:13px; font-weight:600; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:6px; border:1px solid var(--hairline); transition:transform .15s ease; }
+  #preview-actions button:active, #preview-actions a:active{ transform:scale(.95); }
+  #dl-btn{ background:linear-gradient(135deg, var(--amber), #c68a45); color:#1a1305; border:none; }
+  #close-preview{ background:var(--panel-2); color:var(--text); }
+  #use-photo-btn{ background:var(--amber); color:#1a1305; border-color:var(--amber); }
+
+  #crop-modal{ position:fixed; inset:0; background:#000; z-index:50; display:none; flex-direction:column; align-items:center; justify-content:center; padding:20px; box-sizing:border-box; }
+  #crop-modal.show{ display:flex; }
+  #crop-stage{ position:relative; max-width:94vw; max-height:70vh; touch-action:none; line-height:0; }
+  #crop-img{ display:block; max-width:94vw; max-height:70vh; -webkit-user-drag:none; user-select:none; }
+  #crop-rect{ transition:opacity .1s ease; }
+  #crop-rect{ position:absolute; border:2px solid var(--amber); background:rgba(224,167,94,0.14); box-sizing:border-box; }
+  .crop-handle{ position:absolute; width:26px; height:26px; margin:-13px; border-radius:50%; background:var(--amber); border:2px solid #12151a; touch-action:none; box-shadow:0 2px 6px rgba(0,0,0,0.5); }
+  #crop-h-tl{ top:0; left:0; cursor:nwse-resize; }
+  #crop-h-tr{ top:0; left:100%; cursor:nesw-resize; }
+  #crop-h-bl{ top:100%; left:0; cursor:nesw-resize; }
+  #crop-h-br{ top:100%; left:100%; cursor:nwse-resize; }
+  #crop-actions{ display:flex; gap:12px; margin-top:20px; }
+  #crop-actions button{ padding:12px 22px; border-radius:999px; border:1px solid var(--hairline); background:var(--panel-2); color:var(--text); font-family:var(--font-body); font-weight:600; font-size:13px; cursor:pointer; }
+  #crop-save-btn{ background:var(--amber); color:#1a1305; border-color:var(--amber); }
+  #crop-rotate-row{ display:flex; align-items:center; gap:12px; margin-top:16px; width:min(94vw,420px); }
+  #crop-rotate-row button{ padding:8px 12px; border-radius:999px; border:1px solid var(--hairline); background:var(--panel-2); color:var(--text); font-family:var(--font-body); font-weight:600; font-size:13px; cursor:pointer; flex:0 0 auto; }
+  #crop-rotate-slider{ flex:1 1 auto; accent-color:var(--amber); }
+  #crop-rotate-value{ flex:0 0 44px; text-align:center; font-family:var(--font-body); font-size:13px; color:var(--text); }
+  #processing-note{ font-family:var(--font-mono); font-size:10.5px; color:var(--amber-dim); margin-top:8px; opacity:0; animation:fadeIn .2s ease forwards; }
+
+  #folder-modal, #res-modal{ position:absolute; inset:0; background:rgba(8,9,11,0.85); backdrop-filter:blur(6px); z-index:25; display:none; align-items:flex-end; justify-content:center; }
+  #folder-modal.open, #res-modal.open{ display:flex; animation:fadeIn .2s ease; }
+  #folder-sheet, .sheet-shell{ width:100%; max-width:420px; max-height:78vh; overflow-y:auto; background:var(--panel); border-radius:20px 20px 0 0; padding:22px 20px max(22px, env(safe-area-inset-bottom)) 20px; transform:translateY(100%); animation:sheetUp .22s cubic-bezier(.2,.9,.3,1) forwards; border:1px solid var(--hairline); border-bottom:none; will-change:transform; }
+  @keyframes sheetUp{ to{ transform:translateY(0); } }
+  #folder-sheet h3, .sheet-shell h3{ font-family:var(--font-display); font-size:15px; margin:0 0 12px 0; font-weight:700; }
+  #folder-sheet input{ width:100%; background:var(--panel-2); border:1px solid var(--hairline); border-radius:10px; padding:11px 12px; color:var(--text); font-family:var(--font-mono); font-size:13px; outline:none; margin-bottom:8px; }
+  #folder-hint{ font-family:var(--font-mono); font-size:10.5px; color:var(--muted); margin-bottom:12px; padding-left:2px; }
+  #folder-hint span{ color:var(--amber); }
+  #folder-sheet .row, .sheet-shell .row{ display:flex; gap:10px; }
+  #folder-sheet button, .sheet-shell button{ flex:1; padding:11px; border-radius:10px; font-family:var(--font-body); font-weight:600; font-size:13px; cursor:pointer; border:1px solid var(--hairline); transition:transform .15s ease; background:var(--panel-2); color:var(--text); }
+  #folder-sheet button:active, .sheet-shell button:active{ transform:scale(.96); }
+  #pick-folder-btn{ background:linear-gradient(135deg, var(--amber), #c68a45); color:#1a1305; border:none; }
+  #cancel-folder-btn{ background:var(--panel-2); color:var(--text); }
+
+  #toast{ position:absolute; left:50%; bottom:110px; transform:translateX(-50%) translateY(20px); background:var(--panel-2); border:1px solid var(--hairline); color:var(--text); padding:10px 16px; border-radius:999px; font-size:12px; font-family:var(--font-body); display:flex; align-items:center; gap:7px; opacity:0; z-index:30; box-shadow:0 8px 24px rgba(0,0,0,.4); pointer-events:none; will-change:opacity, transform; }
+  #toast svg{ width:14px; height:14px; stroke:var(--teal); flex-shrink:0; }
+  #toast.show{ animation:toastIn .3s ease forwards, toastOut .3s ease forwards 1.6s; }
+  @keyframes toastIn{ to{ opacity:1; transform:translateX(-50%) translateY(0);} }
+  @keyframes toastOut{ to{ opacity:0; transform:translateX(-50%) translateY(-8px);} }
+
+  @media (max-width:380px){ #size-value{ width:36px; } #shutter-btn{ width:64px; height:64px; } #shutter-inner{ width:48px; height:48px; } #folder-pill span{ max-width:60px; } }
+
+  @media (max-height:480px), (orientation:landscape) and (max-height:520px){
+    #topbar{ gap:5px; padding-top:10px; }
+    .pill{ padding:4px; }
+    .pill-row{ gap:6px; }
+    #shutter-btn{ width:56px; height:56px; }
+    #shutter-inner{ width:42px; height:42px; }
+    #bottombar{ padding:0 clamp(10px,3vw,20px) max(10px, env(safe-area-inset-bottom)) clamp(10px,3vw,20px); }
+    #quickbar{ padding:0 clamp(10px,3vw,20px); gap:8px; }
+    #bottom-controls{ padding-top:10px; gap:8px; }
+    #thumb-wrap, #side-spacer, #settings-toggle{ width:42px; height:42px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <div id="viewfinder-wrap">
+    <video id="video" autoplay playsinline muted></video>
+    <div id="aspect-guide"></div>
+    <div id="grid-lines">
+      <div class="grid-line v" style="left:33.333%"></div>
+      <div class="grid-line v" style="left:66.666%"></div>
+      <div class="grid-line h" style="top:33.333%"></div>
+      <div class="grid-line h" style="top:66.666%"></div>
+    </div>
+    <div id="split-guide">
+      <div class="split-half" id="half-upper"><span class="half-label">1</span><div class="half-thumb" id="half-upper-thumb"></div></div>
+      <div id="split-divider"></div>
+      <div class="split-half" id="half-lower"><span class="half-label">2</span><div class="half-thumb" id="half-lower-thumb"></div></div>
+    </div>
+    <div id="level-indicator">
+      <div id="level-degree">0°</div>
+      <div id="level-ring"><div id="level-dot"></div></div>
+    </div>
+    <div id="flash"></div>
+  </div>
+
+  <div id="permission-screen">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M4 8a2 2 0 0 1 2-2h2l1.2-1.6A2 2 0 0 1 10.8 3.6h2.4a2 2 0 0 1 1.6.8L16 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z" stroke-linecap="round" stroke-linejoin="round"/><circle cx="12" cy="13" r="3.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <h2>Dual Lens</h2>
+    <p id="permission-msg">Camera access needed to continue.</p>
+    <button id="grant-btn">Retry</button>
+  </div>
+
+  <div id="topbar">
+    <div class="group-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8a2 2 0 0 1 2-2h2l1.2-1.6A2 2 0 0 1 10.8 3.6h2.4a2 2 0 0 1 1.6.8L16 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z"/><circle cx="12" cy="13" r="3.5"/></svg>Capture</div>
+    <div class="pill-row">
+      <div class="pill" id="switch-cam"><svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M17 2l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 22l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>
+      <div class="pill" id="zoom-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/><path d="M8 11h6"/></svg>
+        <input type="number" id="zoom-value" placeholder="0" min="0" max="100" value="0">
+        <span class="zoom-pct">%</span>
+      </div>
+    </div>
+
+    <div class="group-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>Guides</div>
+    <div class="pill-row">
+      <button class="pill toggle-single" id="grid-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+        <span>Grid</span>
+      </button>
+      <button class="pill toggle-single" id="level-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>
+        <span>Level</span>
+      </button>
+    </div>
+
+    <div class="group-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M9 5v14"/></svg>Frame</div>
+    <div class="pill-row">
+      <div class="pill" id="res-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15l5-5 4 4 5-6 4 4"/></svg>
+        <span id="res-label">Full HD</span>
+      </div>
+      <div class="pill" id="aspect-pill">
+        <svg id="aspect-icon" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="3" y="6" width="18" height="12" rx="2"/></svg>
+        <span id="aspect-label">16:9</span>
+      </div>
+    </div>
+
+    <div class="group-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/></svg>Output</div>
+    <div class="pill-row">
+      <div class="pill" id="format-pill">
+        <span class="fmt-opt active" data-fmt="JPG">JPG</span>
+        <span class="fmt-opt" data-fmt="JPEG">JPEG</span>
+        <span class="fmt-opt" data-fmt="PDF">PDF</span>
+      </div>
+      <div class="pill" id="size-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
+        <input type="number" id="size-value" placeholder="500" min="1">
+        <select id="size-unit"><option value="KB">KB</option><option value="MB">MB</option></select>
+      </div>
+    </div>
+
+    <div class="group-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>Save to</div>
+    <div class="pill-row">
+      <div class="pill" id="folder-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>
+        <span id="folder-label">Downloads</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="bottom-controls">
+    <div id="quickbar">
+      <button class="quick-btn" id="crop-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>
+        <span>Crop</span>
+      </button>
+      <div class="pill toggle2" id="mode-toggle">
+        <div class="toggle2-track" id="mode-toggle-track">
+          <div class="toggle2-thumb" id="mode-toggle-thumb"></div>
+          <div class="opt on" data-mode="single"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2.5"/></svg>Single</div>
+          <div class="opt" data-mode="double"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="7" rx="1.5"/><rect x="4" y="13" width="16" height="7" rx="1.5"/></svg>Double</div>
+        </div>
+      </div>
+      <button class="quick-btn" id="orient-pill">
+        <svg id="orient-icon" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect x="6" y="3" width="12" height="18" rx="2"/></svg>
+        <span id="orient-label">Landscape</span>
+      </button>
+    </div>
+    <div id="bottombar">
+      <div id="thumb-wrap">
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="18" height="14" rx="2"/><circle cx="12" cy="13" r="3.5"/></svg>
+        <img id="thumb-img" alt="last capture">
+        <span id="thumb-badge"></span>
+      </div>
+      <button id="shutter-btn">
+        <div id="shutter-ring"></div>
+        <div id="aperture-overlay"></div>
+        <div id="shutter-inner"></div>
+      </button>
+      <div id="settings-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span id="toast-text">Saved</span></div>
+
+  <div id="preview-modal">
+    <div id="preview-img-wrap"><img id="preview-img" alt="captured"></div>
+    <div id="preview-meta"></div>
+    <div id="processing-note" style="display:none;">Compressing to target size…</div>
+    <div id="preview-actions">
+      <button id="use-photo-btn" style="display:none;">Use This Photo</button>
+      <a id="dl-btn" href="#" download="capture.jpg"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>Download</a>
+      <button id="close-preview">Close</button>
+    </div>
+  </div>
+
+  <div id="crop-modal">
+    <div id="crop-stage">
+      <img id="crop-img" alt="crop preview" draggable="false">
+      <div id="crop-rect">
+        <div class="crop-handle" id="crop-h-tl" data-corner="tl"></div>
+        <div class="crop-handle" id="crop-h-tr" data-corner="tr"></div>
+        <div class="crop-handle" id="crop-h-bl" data-corner="bl"></div>
+        <div class="crop-handle" id="crop-h-br" data-corner="br"></div>
+      </div>
+    </div>
+    <div id="crop-rotate-row">
+      <button id="crop-rotate-minus" type="button">−1°</button>
+      <input type="range" id="crop-rotate-slider" min="-45" max="45" step="0.5" value="0">
+      <span id="crop-rotate-value">0°</span>
+      <button id="crop-rotate-plus" type="button">+1°</button>
+    </div>
+    <div id="crop-actions">
+      <button id="crop-reset-btn">Reset</button>
+      <button id="crop-cancel-btn">Cancel</button>
+      <button id="crop-save-btn">Save</button>
+    </div>
+  </div>
+
+  <div id="folder-modal">
+    <div id="folder-sheet">
+      <h3>Save Folder</h3>
+      <input type="text" id="folder-input" placeholder="Folder name">
+      <div id="folder-hint">Saves to Downloads/<span id="folder-hint-name">FolderName</span></div>
+      <div class="row">
+        <button id="cancel-folder-btn">Cancel</button>
+        <button id="pick-folder-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="res-modal">
+    <div id="res-sheet" class="sheet-shell">
+      <h3>Image Resolution</h3>
+      <div id="res-list"></div>
+      <div class="row"><button id="cancel-res-btn">Cancel</button></div>
+    </div>
+  </div>
+
+  <canvas id="canvas" style="display:none;"></canvas>
+</div>
+
+<script>
+(function(){
+  const video = document.getElementById('video');
+
+  const SETTINGS_KEY = 'dualLensSettings';
+  function loadStoredSettings(){
+    try{ return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'); }
+    catch(e){ return {}; }
+  }
+  function saveStoredSettings(){
+    try{
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        mode, format, facing,
+        sizeValue: document.getElementById('size-value').value,
+        sizeUnit: document.getElementById('size-unit').value,
+        resName: selectedRes.name,
+        aspectRatio, orientation,
+        zoomPercent: document.getElementById('zoom-value').value,
+        saveDirLabel,
+        cropEnabled, gridEnabled, levelEnabled
+      }));
+    }catch(e){ /* localStorage unavailable — settings just won't persist */ }
+  }
+  const stored = loadStoredSettings();
+
+  let currentStream = null;
+  let facing = stored.facing || 'environment';
+  let mode = stored.mode || 'single';
+  let format = stored.format || 'JPG';
+  let doubleStage = 0;
+  let upperCanvasDataURL = null;
+  let lastResult = null;
+  let saveDirHandle = null;
+  let saveDirLabel = stored.saveDirLabel || 'Downloads';
+  let cropEnabled = !!stored.cropEnabled;
+  let gridEnabled = !!stored.gridEnabled;
+  let levelEnabled = !!stored.levelEnabled;
+  const isCordova = !!window.cordova;
+
+  const RES_OPTIONS = [
+    { name:'Very Low', long:426 },
+    { name:'Low',      long:640 },
+    { name:'SD',       long:854 },
+    { name:'HD',       long:1280 },
+    { name:'Full HD',  long:1920 }
+  ];
+  let selectedRes = RES_OPTIONS.find(r => r.name === stored.resName) || RES_OPTIONS[4]; // remembered until user changes it
+  let aspectRatio = stored.aspectRatio || '16:9';         // '16:9' | '4:3' — remembered until user changes it
+  let orientation = stored.orientation || (window.matchMedia('(orientation: portrait)').matches ? 'portrait' : 'landscape'); // remembered until user changes it
+
+  const MAX_DIGITAL_ZOOM = 4; // 100% => 4x when hardware zoom isn't available
+  let zoomCaps = null;
+  let hwZoomSupported = false;
+  let zoomScale = 1; // digital fallback scale factor, kept in sync with the zoom input
+
+  function computeDims(opt){
+    const shortRatio = aspectRatio === '4:3' ? 3/4 : 9/16;
+    const short = Math.round(opt.long * shortRatio);
+    return orientation === 'landscape' ? { w: opt.long, h: short } : { w: short, h: opt.long };
+  }
+
+  function updateAspectGuide(){
+    const ratio = aspectRatio === '4:3' ? 4/3 : 16/9;
+    const ar = orientation === 'landscape' ? ratio : 1/ratio;
+    document.getElementById('aspect-guide').style.setProperty('--ar', ar);
+  }
+
+  // Keeps the aspect-ratio guide from overlapping the bottom quick-bar/shutter row —
+  // measures the real rendered height so it works across screen sizes/safe areas.
+  function updateBottomReserve(){
+    const el = document.getElementById('bottom-controls');
+    if(!el) return;
+    const h = el.offsetHeight;
+    if(h > 0) document.documentElement.style.setProperty('--bottom-reserve', (h + 14) + 'px');
+  }
+  window.addEventListener('resize', updateBottomReserve);
+  window.addEventListener('orientationchange', ()=> setTimeout(updateBottomReserve, 200));
+
+  async function startCamera(){
+    if(isNativeApp() && window.Capacitor.Plugins.Filesystem){
+      try{ await window.Capacitor.Plugins.Filesystem.requestPermissions(); }catch(e){}
+    }
+    try{
+      if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); }
+      video.classList.remove('ready');
+      currentStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: facing, width:{ideal:3840}, height:{ideal:2160} },
+        audio:false
+      });
+      video.srcObject = currentStream;
+      try{ await video.play(); }catch(e){ /* some WebViews need a user gesture; ignore */ }
+
+      let readyFired = false;
+      const markReady = ()=>{
+        if(readyFired) return;
+        readyFired = true;
+        video.classList.add('ready');
+        document.getElementById('permission-screen').classList.remove('show');
+        document.getElementById('bottombar').classList.add('in');
+        document.getElementById('quickbar').classList.add('in');
+        document.getElementById('settings-toggle').style.display = 'flex';
+        updateBottomReserve();
+      };
+      video.addEventListener('playing', markReady, { once:true });
+      video.addEventListener('loadeddata', markReady, { once:true });
+      setTimeout(markReady, 1200); // fallback in case the WebView never fires media events
+
+      const track = currentStream.getVideoTracks()[0];
+      zoomCaps = (track.getCapabilities && track.getCapabilities().zoom) ? track.getCapabilities().zoom : null;
+      hwZoomSupported = !!zoomCaps;
+      applyZoom(getZoomPercent());
+    }catch(err){
+      document.getElementById('permission-msg').textContent = 'Camera access denied (' + err.name + '). Check browser/app permissions and retry.';
+      document.getElementById('permission-screen').classList.add('show');
+    }
+  }
+  document.getElementById('grant-btn').addEventListener('click', startCamera);
+  document.getElementById('switch-cam').addEventListener('click', ()=>{
+    facing = facing === 'environment' ? 'user' : 'environment';
+    saveStoredSettings();
+    startCamera();
+  });
+  startCamera(); // open camera immediately on load, no button needed
+
+  // ---------- settings panel toggle ----------
+  const settingsToggle = document.getElementById('settings-toggle');
+  const topbarPanel = document.getElementById('topbar');
+  settingsToggle.addEventListener('click', ()=>{
+    const nowOpen = topbarPanel.classList.toggle('open');
+    settingsToggle.classList.toggle('open', nowOpen);
+    document.getElementById('aspect-guide').style.opacity = nowOpen ? '0' : '';
+  });
+
+  // ---------- zoom (0–100%, remembered until changed) ----------
+  const zoomValueEl = document.getElementById('zoom-value');
+  zoomValueEl.value = stored.zoomPercent !== undefined ? stored.zoomPercent : 0;
+  function getZoomPercent(){
+    let v = parseFloat(zoomValueEl.value);
+    if(isNaN(v)) v = 0;
+    return Math.max(0, Math.min(100, v));
+  }
+  function applyZoom(percent){
+    zoomScale = 1 + (percent/100) * (MAX_DIGITAL_ZOOM - 1);
+    if(hwZoomSupported && currentStream){
+      const track = currentStream.getVideoTracks()[0];
+      const val = zoomCaps.min + (zoomCaps.max - zoomCaps.min) * (percent/100);
+      track.applyConstraints({ advanced:[{ zoom: val }] }).catch(()=>{});
+      video.style.transform = 'scale(1)';
+    } else {
+      video.style.transform = 'scale(' + zoomScale + ')';
+    }
+  }
+  zoomValueEl.addEventListener('input', ()=>{ applyZoom(getZoomPercent()); saveStoredSettings(); });
+
+  const modeToggle = document.getElementById('mode-toggle');
+  const modeThumb = document.getElementById('mode-toggle-thumb');
+  const splitGuide = document.getElementById('split-guide');
+  const shutterBtn = document.getElementById('shutter-btn');
+
+  function setMode(newMode){
+    mode = newMode;
+    modeThumb.classList.toggle('second', mode==='double');
+    document.querySelectorAll('#mode-toggle .opt').forEach(o=> o.classList.toggle('on', o.dataset.mode===mode));
+    splitGuide.classList.toggle('active', mode==='double');
+    shutterBtn.classList.toggle('double-active', mode==='double');
+    doubleStage = 0; upperCanvasDataURL = null;
+    resetSplitGuideVisual();
+  }
+  modeToggle.addEventListener('click', ()=>{ setMode(mode==='single' ? 'double' : 'single'); saveStoredSettings(); });
+  setMode(mode); // reflect restored (or default) mode in the UI
+
+  // ---------- crop toggle ----------
+  const cropToggle = document.getElementById('crop-toggle');
+  function setCropEnabled(v){
+    cropEnabled = v;
+    cropToggle.classList.toggle('active', cropEnabled);
+  }
+  cropToggle.addEventListener('click', ()=>{ setCropEnabled(!cropEnabled); saveStoredSettings(); });
+  setCropEnabled(cropEnabled);
+
+  // ---------- grid lines toggle ----------
+  const gridToggle = document.getElementById('grid-toggle');
+  function setGridEnabled(v){
+    gridEnabled = v;
+    gridToggle.classList.toggle('active', gridEnabled);
+    document.getElementById('grid-lines').classList.toggle('show', gridEnabled);
+  }
+  gridToggle.addEventListener('click', ()=>{ setGridEnabled(!gridEnabled); saveStoredSettings(); });
+  setGridEnabled(gridEnabled);
+
+  // ---------- level guide toggle (bubble-level tilt indicator) ----------
+  const levelToggle = document.getElementById('level-toggle');
+  const levelIndicatorEl = document.getElementById('level-indicator');
+  const levelDegreeEl = document.getElementById('level-degree');
+  const levelDotEl = document.getElementById('level-dot');
+  let levelListenerAttached = false;
+
+  function updateLevelReading(beta, gamma){
+    // beta = front-back tilt, gamma = left-right tilt; both ~0 when the phone
+    // is held flat/level — exactly what you want when shooting a document
+    // straight-on, in both Single and Double mode (this just overlays the
+    // viewfinder, it doesn't change capture behavior).
+    const maxOffset = 26; // px the dot can travel inside the ring
+    const scale = 2.4;    // px per degree of tilt
+    const ox = Math.max(-maxOffset, Math.min(maxOffset, gamma * scale));
+    const oy = Math.max(-maxOffset, Math.min(maxOffset, beta * scale));
+    levelDotEl.style.transform = `translate(${ox}px, ${oy}px)`;
+    const angle = Math.round(Math.sqrt(beta*beta + gamma*gamma));
+    levelDegreeEl.textContent = angle + '°';
+    const isLevel = angle <= 3;
+    levelIndicatorEl.classList.toggle('level', isLevel);
+    levelIndicatorEl.classList.toggle('tilted', !isLevel);
+  }
+
+  function attachLevelListener(){
+    if(levelListenerAttached) return;
+    levelListenerAttached = true;
+    window.addEventListener('deviceorientation', (e)=>{
+      if(!levelEnabled) return;
+      updateLevelReading(e.beta || 0, e.gamma || 0);
+    });
+  }
+
+  function setLevelEnabled(v){
+    levelEnabled = v;
+    levelToggle.classList.toggle('active', levelEnabled);
+    levelIndicatorEl.classList.toggle('show', levelEnabled);
+    if(levelEnabled) attachLevelListener();
+  }
+  levelToggle.addEventListener('click', ()=>{ setLevelEnabled(!levelEnabled); saveStoredSettings(); });
+  setLevelEnabled(levelEnabled);
+
+  function resetSplitGuideVisual(){
+    ['upper','lower'].forEach(k=>{
+      document.getElementById('half-'+k).classList.remove('pending','done');
+      document.getElementById('half-'+k+'-thumb').classList.remove('show');
+    });
+    document.getElementById('half-upper').classList.add('pending');
+  }
+
+  document.getElementById('format-pill').addEventListener('click', (e)=>{
+    const t = e.target.closest('.fmt-opt');
+    if(!t) return;
+    format = t.dataset.fmt;
+    document.querySelectorAll('.fmt-opt').forEach(el=> el.classList.toggle('active', el===t));
+    saveStoredSettings();
+  });
+  document.querySelectorAll('.fmt-opt').forEach(el=> el.classList.toggle('active', el.dataset.fmt===format));
+
+  const sizeValueEl = document.getElementById('size-value');
+  const sizeUnitEl = document.getElementById('size-unit');
+  sizeValueEl.value = stored.sizeValue !== undefined ? stored.sizeValue : 500;
+  sizeUnitEl.value = stored.sizeUnit || 'KB';
+  sizeValueEl.addEventListener('input', saveStoredSettings);
+  sizeUnitEl.addEventListener('change', saveStoredSettings);
+  function getTargetBytes(){
+    const v = parseFloat(sizeValueEl.value);
+    if(!v || v<=0) return null;
+    return sizeUnitEl.value === 'MB' ? v*1024*1024 : v*1024;
+  }
+
+  // ---------- folder setting ----------
+  const folderModal = document.getElementById('folder-modal');
+  const folderLabelEl = document.getElementById('folder-label');
+  folderLabelEl.textContent = saveDirLabel;
+  const folderInputEl = document.getElementById('folder-input');
+  const folderHintNameEl = document.getElementById('folder-hint-name');
+  document.getElementById('folder-pill').addEventListener('click', ()=>{
+    folderInputEl.value = saveDirLabel;
+    folderHintNameEl.textContent = saveDirLabel;
+    folderModal.classList.add('open');
+  });
+  folderInputEl.addEventListener('input', ()=>{
+    folderHintNameEl.textContent = folderInputEl.value.trim() || 'Downloads';
+  });
+  document.getElementById('cancel-folder-btn').addEventListener('click', ()=> folderModal.classList.remove('open'));
+  document.getElementById('pick-folder-btn').addEventListener('click', async ()=>{
+    let pickedViaDialog = false;
+    if(!isCordova && 'showDirectoryPicker' in window){
+      try{
+        saveDirHandle = await window.showDirectoryPicker();
+        saveDirLabel = saveDirHandle.name;
+        pickedViaDialog = true;
+      }catch(e){ /* not actually supported here (common on Android) or user cancelled — fall back below */ }
+    }
+    if(!pickedViaDialog){
+      const v = folderInputEl.value.trim();
+      if(v){ saveDirLabel = sanitizeFolderName(v); saveDirHandle = null; }
+    }
+    folderLabelEl.textContent = saveDirLabel;
+    folderModal.classList.remove('open');
+    saveStoredSettings();
+  });
+  function sanitizeFolderName(name){
+    return name.replace(/[\\/:*?"<>|]+/g, '').replace(/^\.+/, '').trim() || 'Downloads';
+  }
+
+  // ---------- resolution setting ----------
+  const resModal = document.getElementById('res-modal');
+  const resListEl = document.getElementById('res-list');
+  const resLabelEl = document.getElementById('res-label');
+  resLabelEl.textContent = selectedRes.name;
+
+  function renderResList(){
+    resListEl.innerHTML = '';
+    RES_OPTIONS.forEach(opt=>{
+      const dims = computeDims(opt);
+      const row = document.createElement('div');
+      row.className = 'res-opt' + (opt===selectedRes ? ' active' : '');
+      row.innerHTML =
+        '<div class="res-row"><span class="res-name">'+opt.name+'</span></div>'+
+        '<div class="res-row"><span class="res-dim">'+dims.w+' × '+dims.h+' px</span>'+
+        '<svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>';
+      row.addEventListener('click', ()=>{
+        selectedRes = opt;
+        resLabelEl.textContent = opt.name;
+        renderResList();
+        setTimeout(()=> resModal.classList.remove('open'), 180);
+        saveStoredSettings();
+      });
+      resListEl.appendChild(row);
+    });
+  }
+  document.getElementById('res-pill').addEventListener('click', ()=>{
+    renderResList();
+    resModal.classList.add('open');
+  });
+  document.getElementById('cancel-res-btn').addEventListener('click', ()=> resModal.classList.remove('open'));
+
+  // ---------- aspect ratio (4:3 / 16:9) — remembered until changed ----------
+  const aspectLabelEl = document.getElementById('aspect-label');
+  const aspectIcon = document.getElementById('aspect-icon');
+  aspectLabelEl.textContent = aspectRatio;
+  document.getElementById('aspect-pill').addEventListener('click', ()=>{
+    aspectRatio = aspectRatio === '16:9' ? '4:3' : '16:9';
+    aspectLabelEl.textContent = aspectRatio;
+    aspectIcon.style.transition = 'transform .25s ease';
+    aspectIcon.style.transform = 'scale(0.7)';
+    setTimeout(()=> aspectIcon.style.transform = 'scale(1)', 120);
+    updateAspectGuide();
+    saveStoredSettings();
+  });
+
+  // ---------- orientation (Portrait / Landscape) — remembered until changed ----------
+  const orientLabelEl = document.getElementById('orient-label');
+  const orientIcon = document.getElementById('orient-icon');
+  const orientBtn = document.getElementById('orient-pill');
+  function applyOrientationIcon(){
+    orientIcon.innerHTML = orientation === 'landscape'
+      ? '<rect x="3" y="6" width="18" height="12" rx="2"/>'
+      : '<rect x="6" y="3" width="12" height="18" rx="2"/>';
+  }
+  function applyOrientationColor(){
+    orientBtn.classList.toggle('o-landscape', orientation==='landscape');
+    orientBtn.classList.toggle('o-portrait', orientation==='portrait');
+  }
+  document.getElementById('orient-pill').addEventListener('click', ()=>{
+    orientation = orientation === 'landscape' ? 'portrait' : 'landscape';
+    orientLabelEl.textContent = orientation === 'landscape' ? 'Landscape' : 'Portrait';
+    orientIcon.style.transition = 'transform .3s ease';
+    orientIcon.style.transform = 'rotate(90deg)';
+    setTimeout(()=>{ applyOrientationIcon(); orientIcon.style.transform = 'rotate(0deg)'; }, 150);
+    applyOrientationColor();
+    updateAspectGuide();
+    saveStoredSettings();
+  });
+  applyOrientationIcon();
+  applyOrientationColor();
+  orientLabelEl.textContent = orientation === 'landscape' ? 'Landscape' : 'Portrait';
+  updateAspectGuide();
+  updateBottomReserve();
+
+  // scale + center-crop a canvas to exactly targetW x targetH
+  function resizeToResolution(c, targetW, targetH){
+    const scale = Math.max(targetW / c.width, targetH / c.height);
+    const sw = targetW / scale, sh = targetH / scale;
+    const sx = (c.width - sw) / 2, sy = (c.height - sh) / 2;
+    const out = document.createElement('canvas');
+    out.width = targetW; out.height = targetH;
+    const octx = out.getContext('2d');
+    octx.imageSmoothingQuality = 'high';
+    octx.drawImage(c, sx, sy, sw, sh, 0, 0, targetW, targetH);
+    return out;
+  }
+
+  function showToast(text){
+    const t = document.getElementById('toast');
+    document.getElementById('toast-text').textContent = text;
+    t.classList.remove('show'); void t.offsetWidth; t.classList.add('show');
+  }
+
+  function blobToBase64(blob){
+    return new Promise((resolve, reject)=>{
+      const reader = new FileReader();
+      reader.onloadend = ()=> resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  function isNativeApp(){
+    return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  }
+
+  // ---------- external "capture image" request handling ----------
+  let captureReturnMode = false;
+  async function initCaptureReturnMode(){
+    if(!isNativeApp() || !window.Capacitor.Plugins.CaptureBridge) return;
+    try{
+      const res = await window.Capacitor.Plugins.CaptureBridge.isCaptureRequest();
+      captureReturnMode = !!res.value;
+      if(captureReturnMode){
+        document.getElementById('use-photo-btn').style.display = 'inline-flex';
+        if(typeof format !== 'undefined') format = 'JPEG'; // caller expects an image, not a PDF
+      }
+    }catch(e){ /* not launched as a capture request */ }
+  }
+
+  document.getElementById('use-photo-btn').addEventListener('click', async ()=>{
+    if(!lastResult || !isNativeApp()) return;
+    try{
+      const base64Data = await blobToBase64(lastResult.blob);
+      await window.Capacitor.Plugins.CaptureBridge.returnCapture({ base64: base64Data });
+      // app closes itself on the native side after this resolves
+    }catch(e){
+      showToast('Could not return photo: ' + (e && e.message ? e.message : e));
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', initCaptureReturnMode);
+  if(document.readyState !== 'loading') initCaptureReturnMode();
+
+  async function saveFile(blob, filename){
+    // Running as the installed APK: write the file for real using the native Filesystem plugin.
+    // (The old <a download> and File System Access tricks below don't work inside a Capacitor WebView.)
+    if(isNativeApp()){
+      try{
+        const Filesystem = window.Capacitor.Plugins.Filesystem;
+        const base64Data = await blobToBase64(blob);
+        const path = (saveDirLabel ? saveDirLabel + '/' : '') + filename;
+        await Filesystem.writeFile({
+          path,
+          data: base64Data,
+          directory: 'DOCUMENTS',
+          recursive: true
+        });
+        showToast('Saved to Documents/' + saveDirLabel);
+      }catch(e){
+        showToast('Save failed: ' + (e && e.message ? e.message : e));
+      }
+      return;
+    }
+
+    if(saveDirHandle){
+      try{
+        const fh = await saveDirHandle.getFileHandle(filename, {create:true});
+        const w = await fh.createWritable();
+        await w.write(blob); await w.close();
+        showToast('Saved to ' + saveDirLabel);
+        return;
+      }catch(e){ /* fall through to download */ }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    // Chrome's Android download manager creates a subfolder under Downloads when the
+    // download attribute contains a path — this is what actually makes "Save to" work.
+    a.download = saveDirLabel ? (saveDirLabel + '/' + filename) : filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    showToast('Saved to Downloads/' + saveDirLabel);
+  }
+
+  // ---------- capture ----------
+  function flash(){ const f=document.getElementById('flash'); f.classList.remove('flash-play'); void f.offsetWidth; f.classList.add('flash-play'); }
+  function ringPulse(){ const r=document.getElementById('shutter-ring'); r.classList.remove('ring-pulse'); void r.offsetWidth; r.classList.add('ring-pulse'); }
+  function aperturePlay(){ const a=document.getElementById('aperture-overlay'); a.classList.remove('aperture-play'); void a.offsetWidth; a.classList.add('aperture-play'); }
+
+  // Document-quality enhance: contrast boost + resize-to-target first (fast), then sharpen on the
+  // smaller canvas so capture feels instant and the crop always matches the chosen aspect/orientation.
+  function grabFrameCanvas(){
+    const w = video.videoWidth, h = video.videoHeight;
+    const native = document.createElement('canvas');
+    native.width = w; native.height = h;
+    const nctx = native.getContext('2d');
+    nctx.filter = 'contrast(1.12) saturate(1.04) brightness(1.02)';
+    if(!hwZoomSupported && zoomScale > 1){
+      const cw = w / zoomScale, ch = h / zoomScale;
+      const sx = (w - cw) / 2, sy = (h - ch) / 2;
+      nctx.drawImage(video, sx, sy, cw, ch, 0, 0, w, h);
+    } else {
+      nctx.drawImage(video, 0, 0, w, h);
+    }
+
+    const dims = computeDims(selectedRes);
+    const resized = resizeToResolution(native, dims.w, dims.h);
+
+    const rctx = resized.getContext('2d', { willReadFrequently:true });
+    sharpen(rctx, dims.w, dims.h);
+    return resized;
+  }
+
+  function sharpen(cx, w, h){
+    // Mathematically identical to the 3x3 [0,-1,0, -1,5,-1, 0,-1,0] kernel above —
+    // the four corner weights are 0, so we skip them and read the 4 needed
+    // neighbours directly instead of looping a 3x3 window per pixel. Same
+    // output, ~3x fewer array reads/multiplies, no quality change.
+    const src = cx.getImageData(0,0,w,h);
+    const d = src.data;
+    const out = new Uint8ClampedArray(d);
+    const rowBytes = w*4;
+    for(let y=1; y<h-1; y++){
+      let i = (y*w + 1)*4;
+      const end = i + (w-2)*4;
+      for(; i<end; i+=4){
+        const up = i - rowBytes, down = i + rowBytes, left = i - 4, right = i + 4;
+        out[i]   = 5*d[i]   - d[up]   - d[down]   - d[left]   - d[right];
+        out[i+1] = 5*d[i+1] - d[up+1] - d[down+1] - d[left+1] - d[right+1];
+        out[i+2] = 5*d[i+2] - d[up+2] - d[down+2] - d[left+2] - d[right+2];
+      }
+    }
+    src.data.set(out);
+    cx.putImageData(src,0,0);
+  }
+
+  function combineDoubleCanvas(upperURL, lowerCanvas){
+    return new Promise((resolve)=>{
+      const upperImg = new Image();
+      upperImg.onload = ()=>{
+        const w = Math.max(upperImg.width, lowerCanvas.width);
+        const h = upperImg.height + lowerCanvas.height;
+        const out = document.createElement('canvas');
+        out.width=w; out.height=h;
+        const octx = out.getContext('2d');
+        octx.fillStyle='#000'; octx.fillRect(0,0,w,h);
+        octx.drawImage(upperImg, (w-upperImg.width)/2, 0);
+        octx.drawImage(lowerCanvas, (w-lowerCanvas.width)/2, upperImg.height);
+        resolve(out);
+      };
+      upperImg.src = upperURL;
+    });
+  }
+
+  function nextPaint(){
+    // Lets the browser actually paint the flash/ring animation before the
+    // heavy synchronous canvas work runs, so the shutter feels instant.
+    return new Promise(res => requestAnimationFrame(()=> requestAnimationFrame(res)));
+  }
+
+  // ---------- crop (auto-detect + manual adjust) ----------
+  // Downscales the shot, finds the brightest large rectangular region (the usual
+  // case: a paper document on a darker surface) via an Otsu threshold, and uses
+  // that as the starting selection. If the scene doesn't have clear contrast,
+  // falls back to a safe small inset so there's always something sensible to adjust.
+  function autoDetectCropRect(canvasEl){
+    const W = canvasEl.width, H = canvasEl.height;
+    const scale = 160 / Math.max(W, H);
+    const sw = Math.max(1, Math.round(W*scale)), sh = Math.max(1, Math.round(H*scale));
+    const small = document.createElement('canvas');
+    small.width = sw; small.height = sh;
+    const sctx = small.getContext('2d', { willReadFrequently:true });
+    sctx.drawImage(canvasEl, 0, 0, sw, sh);
+    const { data } = sctx.getImageData(0, 0, sw, sh);
+
+    const gray = new Uint8ClampedArray(sw*sh);
+    const hist = new Array(256).fill(0);
+    for(let i=0, p=0; i<data.length; i+=4, p++){
+      const g = (data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114) | 0;
+      gray[p] = g; hist[g]++;
+    }
+
+    const total = sw*sh;
+    let sum=0; for(let t=0;t<256;t++) sum += t*hist[t];
+    let sumB=0, wB=0, maxVar=0, threshold=127;
+    for(let t=0;t<256;t++){
+      wB += hist[t]; if(wB===0) continue;
+      const wF = total - wB; if(wF===0) break;
+      sumB += t*hist[t];
+      const mB = sumB/wB, mF = (sum-sumB)/wF;
+      const varBetween = wB*wF*(mB-mF)*(mB-mF);
+      if(varBetween > maxVar){ maxVar = varBetween; threshold = t; }
+    }
+
+    const rowFrac = new Array(sh).fill(0), colFrac = new Array(sw).fill(0);
+    for(let y=0;y<sh;y++) for(let x=0;x<sw;x++){
+      if(gray[y*sw+x] > threshold){ rowFrac[y]++; colFrac[x]++; }
+    }
+    for(let y=0;y<sh;y++) rowFrac[y] /= sw;
+    for(let x=0;x<sw;x++) colFrac[x] /= sh;
+
+    const FRAC_THRESH = 0.35;
+    function largestRun(arr){
+      let bestStart=0, bestLen=0, curStart=-1;
+      for(let i=0;i<arr.length;i++){
+        if(arr[i] >= FRAC_THRESH){ if(curStart===-1) curStart=i; }
+        else if(curStart!==-1){ const len=i-curStart; if(len>bestLen){bestLen=len;bestStart=curStart;} curStart=-1; }
+      }
+      if(curStart!==-1){ const len=arr.length-curStart; if(len>bestLen){bestLen=len;bestStart=curStart;} }
+      return bestLen>0 ? [bestStart, bestStart+bestLen] : null;
+    }
+
+    const rowsRun = largestRun(rowFrac), colsRun = largestRun(colFrac);
+    let x0,y0,x1,y1;
+    if(rowsRun && colsRun && (colsRun[1]-colsRun[0]) > sw*0.25 && (rowsRun[1]-rowsRun[0]) > sh*0.25){
+      x0 = colsRun[0]/sw; x1 = colsRun[1]/sw; y0 = rowsRun[0]/sh; y1 = rowsRun[1]/sh;
+    } else {
+      x0=0.04; y0=0.04; x1=0.96; y1=0.96; // low-confidence fallback
+    }
+    return { x0, y0, x1, y1 };
+  }
+
+  let cropRectPct = null;
+  let cropDragState = null;
+
+  function updateCropRectVisual(){
+    const stage = document.getElementById('crop-stage');
+    const rectEl = document.getElementById('crop-rect');
+    const w = stage.clientWidth, h = stage.clientHeight;
+    const r = cropRectPct;
+    rectEl.style.left = (r.x0*w)+'px';
+    rectEl.style.top = (r.y0*h)+'px';
+    rectEl.style.width = ((r.x1-r.x0)*w)+'px';
+    rectEl.style.height = ((r.y1-r.y0)*h)+'px';
+  }
+
+  function rotateCanvas(srcCanvas, deg){
+    const rad = deg * Math.PI / 180;
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const newW = Math.round(Math.abs(w*Math.cos(rad)) + Math.abs(h*Math.sin(rad)));
+    const newH = Math.round(Math.abs(w*Math.sin(rad)) + Math.abs(h*Math.cos(rad)));
+    const out = document.createElement('canvas');
+    out.width = newW; out.height = newH;
+    const ctx = out.getContext('2d');
+    ctx.translate(newW/2, newH/2);
+    ctx.rotate(rad);
+    ctx.drawImage(srcCanvas, -w/2, -h/2);
+    return out;
+  }
+
+  function makePreviewCanvas(srcCanvas, maxDim){
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const scale = Math.min(1, maxDim / Math.max(w, h));
+    if(scale >= 1) return srcCanvas;
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(w*scale));
+    out.height = Math.max(1, Math.round(h*scale));
+    out.getContext('2d').drawImage(srcCanvas, 0, 0, out.width, out.height);
+    return out;
+  }
+
+  function openCropScreen(canvasEl){
+    return new Promise((resolve)=>{
+      const modal = document.getElementById('crop-modal');
+      const img = document.getElementById('crop-img');
+      const stage = document.getElementById('crop-stage');
+      const slider = document.getElementById('crop-rotate-slider');
+      const valueLabel = document.getElementById('crop-rotate-value');
+
+      // Live rotation/preview works on a small downscaled copy so dragging the
+      // slider stays smooth. Full-resolution rotation only happens once, on Save.
+      const previewSrc = makePreviewCanvas(canvasEl, 900);
+
+      let rotateDeg = 0;
+      let workingPreview = previewSrc; // the (possibly rotated) small canvas currently shown & used for the crop rect
+      let commitTimer = null;
+
+      // Reset any leftover visual state from a previous crop session (e.g. if
+      // "Save" was clicked mid-drag last time, before the rotation settled).
+      const rectEl = document.getElementById('crop-rect');
+      img.style.transform = 'none';
+      rectEl.style.opacity = '1';
+
+      function applyAuto(){
+        let autoPct;
+        try{ autoPct = autoDetectCropRect(workingPreview); }
+        catch(e){ autoPct = { x0:0.04, y0:0.04, x1:0.96, y1:0.96 }; }
+        cropRectPct = autoPct;
+        updateCropRectVisual();
+      }
+
+      function renderWorkingImage(keepSelection){
+        workingPreview = rotateDeg === 0 ? previewSrc : rotateCanvas(previewSrc, rotateDeg);
+        img.src = workingPreview.toDataURL('image/jpeg', 0.85);
+        // canvas.toDataURL() is synchronous and we already know workingPreview's
+        // pixel size, so the crop math doesn't need to wait for the <img> to
+        // finish loading/laying out — only re-run it here, directly.
+        if(keepSelection) updateCropRectVisual(); else applyAuto();
+        // Safety net: once the <img> has actually laid out, re-align the overlay
+        // in case the stage size wasn't settled yet when we drew it above.
+        img.onload = ()=> updateCropRectVisual();
+      }
+
+      renderWorkingImage(false); // initial render: angle 0, run auto-detect
+      modal.classList.add('show');
+
+      // While dragging the slider we only move the image with a cheap CSS
+      // transform (no canvas rotate/encode), which stays perfectly smooth.
+      // The real pixel rotation + crop-rect placement is committed a moment
+      // after the user stops moving the slider.
+      function liveRotatePreview(deg){
+        img.style.transform = 'rotate(' + deg + 'deg)';
+        rectEl.style.opacity = '0';
+      }
+
+      function commitRotation(keepSelection){
+        img.style.transform = 'none';
+        renderWorkingImage(keepSelection);
+        rectEl.style.opacity = '1';
+      }
+
+      function scheduleCommit(keepSelection){
+        if(commitTimer) clearTimeout(commitTimer);
+        commitTimer = setTimeout(()=>{ commitTimer=null; commitRotation(keepSelection); }, 120);
+      }
+
+      slider.value = '0';
+      valueLabel.textContent = '0°';
+      function setRotate(deg, immediate){
+        rotateDeg = Math.max(-45, Math.min(45, deg));
+        slider.value = String(rotateDeg);
+        valueLabel.textContent = rotateDeg + '°';
+        if(immediate){
+          if(commitTimer){ clearTimeout(commitTimer); commitTimer=null; }
+          commitRotation(true);
+        } else {
+          liveRotatePreview(rotateDeg);
+          scheduleCommit(true); // keep the current crop selection once it settles
+        }
+      }
+      slider.oninput = ()=> setRotate(parseFloat(slider.value), false);
+      slider.onchange = ()=> setRotate(parseFloat(slider.value), true); // fires on release — commit right away
+      document.getElementById('crop-rotate-minus').onclick = ()=> setRotate(rotateDeg - 1, true);
+      document.getElementById('crop-rotate-plus').onclick = ()=> setRotate(rotateDeg + 1, true);
+
+      const MIN = 0.06;
+      function clamp01(v){ return Math.max(0, Math.min(1, v)); }
+      function onPointerMove(e){
+        if(!cropDragState) return;
+        const stageRect = stage.getBoundingClientRect();
+        const px = clamp01((e.clientX - stageRect.left) / stageRect.width);
+        const py = clamp01((e.clientY - stageRect.top) / stageRect.height);
+        const r = cropRectPct, c = cropDragState.corner;
+        if(c==='tl'){ r.x0 = Math.min(px, r.x1-MIN); r.y0 = Math.min(py, r.y1-MIN); }
+        if(c==='tr'){ r.x1 = Math.max(px, r.x0+MIN); r.y0 = Math.min(py, r.y1-MIN); }
+        if(c==='bl'){ r.x0 = Math.min(px, r.x1-MIN); r.y1 = Math.max(py, r.y0+MIN); }
+        if(c==='br'){ r.x1 = Math.max(px, r.x0+MIN); r.y1 = Math.max(py, r.y0+MIN); }
+        updateCropRectVisual();
+      }
+      function onPointerUp(){ cropDragState = null; }
+      function attachHandle(el, corner){
+        el.onpointerdown = (e)=>{ e.preventDefault(); cropDragState = { corner }; try{ el.setPointerCapture(e.pointerId); }catch(err){} };
+      }
+      ['tl','tr','bl','br'].forEach(c=> attachHandle(document.getElementById('crop-h-'+c), c));
+      stage.addEventListener('pointermove', onPointerMove);
+      window.addEventListener('pointerup', onPointerUp);
+
+      function finish(result){
+        if(commitTimer){ clearTimeout(commitTimer); commitTimer=null; }
+        img.style.transform = 'none';
+        rectEl.style.opacity = '1';
+        modal.classList.remove('show');
+        img.onload = null;
+        slider.oninput = null;
+        slider.onchange = null;
+        stage.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        resolve(result);
+      }
+
+      document.getElementById('crop-reset-btn').onclick = ()=>{ setRotate(0, true); applyAuto(); };
+      document.getElementById('crop-cancel-btn').onclick = ()=> finish(null);
+      document.getElementById('crop-save-btn').onclick = ()=>{
+        // Only now do we rotate the FULL-resolution image, once, and crop out of that.
+        const r = cropRectPct;
+        const fullRotated = rotateDeg === 0 ? canvasEl : rotateCanvas(canvasEl, rotateDeg);
+        const px = Math.round(r.x0*fullRotated.width), py = Math.round(r.y0*fullRotated.height);
+        const pw = Math.round((r.x1-r.x0)*fullRotated.width), ph = Math.round((r.y1-r.y0)*fullRotated.height);
+        const out = document.createElement('canvas');
+        out.width = pw; out.height = ph;
+        out.getContext('2d').drawImage(fullRotated, px, py, pw, ph, 0, 0, pw, ph);
+        finish(out);
+      };
+    });
+  }
+
+  // Routes a captured frame through the crop screen first when Crop is On;
+  // when Crop is Off, behaves exactly as before (straight to save).
+  // Returns the (possibly cropped) canvas, or null if the user cancelled.
+  async function applyCropIfEnabled(canvasEl){
+    if(!cropEnabled) return canvasEl;
+    return await openCropScreen(canvasEl);
+  }
+
+  function setProcessingNote(on, text){
+    const el = document.getElementById('processing-note');
+    if(text) el.textContent = text;
+    el.style.display = on ? 'block' : 'none';
+  }
+
+  shutterBtn.addEventListener('click', async ()=>{
+    if(!video.videoWidth) return;
+    try{
+      flash(); ringPulse(); aperturePlay();
+      await nextPaint();
+
+      if(mode==='single'){
+        setProcessingNote(true, 'Processing…');
+        await nextPaint(); // let "Processing…" actually paint before the blocking work below
+        const frame = grabFrameCanvas();
+        setProcessingNote(false);
+        const finalFrame = await applyCropIfEnabled(frame);
+        if(!finalFrame) return; // cancelled in crop screen
+        await finalizeAndShow(finalFrame);
+        return;
+      }
+      if(doubleStage===0){
+        setProcessingNote(true, 'Processing…');
+        await nextPaint();
+        const upperCanvas = grabFrameCanvas();
+        setProcessingNote(false);
+        const finalUpper = await applyCropIfEnabled(upperCanvas);
+        if(!finalUpper) return; // cancelled -> stay on shot 1, take it again
+        upperCanvasDataURL = finalUpper.toDataURL('image/jpeg', 0.95);
+        doubleStage = 1;
+        document.getElementById('half-upper').classList.remove('pending'); document.getElementById('half-upper').classList.add('done');
+        document.getElementById('half-upper-thumb').style.backgroundImage = 'url('+upperCanvasDataURL+')';
+        document.getElementById('half-upper-thumb').classList.add('show');
+        document.getElementById('half-lower').classList.add('pending');
+      } else {
+        setProcessingNote(true, 'Processing…');
+        await nextPaint();
+        const lowerCanvas = grabFrameCanvas();
+        setProcessingNote(false);
+        const finalLower = await applyCropIfEnabled(lowerCanvas);
+        if(!finalLower) return; // cancelled -> stay on shot 2, take it again
+        document.getElementById('half-lower').classList.remove('pending'); document.getElementById('half-lower').classList.add('done');
+        const lowerURL = finalLower.toDataURL('image/jpeg', 0.95);
+        document.getElementById('half-lower-thumb').style.backgroundImage = 'url('+lowerURL+')';
+        document.getElementById('half-lower-thumb').classList.add('show');
+        const combined = await combineDoubleCanvas(upperCanvasDataURL, finalLower);
+        doubleStage = 0; upperCanvasDataURL = null;
+        setTimeout(resetSplitGuideVisual, 700);
+        await finalizeAndShow(combined); // already cropped per-half, so straight to save
+      }
+    }catch(err){
+      // Surface any unexpected failure instead of leaving the shutter feeling "dead".
+      setProcessingNote(false);
+      showToast('Capture failed: ' + (err && err.message ? err.message : err));
+      document.getElementById('crop-modal').classList.remove('show');
+    }
+  });
+
+  function canvasToBlobAtQuality(c,q){ return new Promise(res=> c.toBlob(b=>res(b), 'image/jpeg', q)); }
+  async function compressToTarget(c, targetBytes){
+    if(!targetBytes){ return canvasToBlobAtQuality(c, 0.96); }
+    let lo=0.3, hi=0.98, best=null;
+    for(let i=0;i<5;i++){
+      const mid=(lo+hi)/2;
+      const blob = await canvasToBlobAtQuality(c, mid);
+      if(!best || Math.abs(blob.size-targetBytes) < Math.abs(best.size-targetBytes)) best = blob;
+      if(Math.abs(blob.size-targetBytes) < targetBytes*0.02) break; // close enough — stop early
+      if(blob.size > targetBytes) hi = mid; else lo = mid;
+    }
+    return best;
+  }
+
+  function blobToDataURL(blob){ return new Promise(res=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.readAsDataURL(blob); }); }
+
+  async function buildPDF(c, targetBytes){
+    const { jsPDF } = window.jspdf;
+    const imgBlob = await compressToTarget(c, targetBytes ? targetBytes*0.85 : null);
+    const imgBitmap = await createImageBitmap(imgBlob);
+    const orientation = imgBitmap.width > imgBitmap.height ? 'l' : 'p';
+    const pdf = new jsPDF({ orientation, unit:'px', format:[imgBitmap.width, imgBitmap.height] });
+    const dataURL = await blobToDataURL(imgBlob);
+    pdf.addImage(dataURL, 'JPEG', 0, 0, imgBitmap.width, imgBitmap.height);
+    return pdf.output('blob');
+  }
+
+  async function finalizeAndShow(canvasEl){
+    setProcessingNote(true, 'Saving…');
+    const targetBytes = getTargetBytes();
+    let blob, ext;
+    if(format==='PDF'){ blob = await buildPDF(canvasEl, targetBytes); ext='pdf'; }
+    else { blob = await compressToTarget(canvasEl, targetBytes); ext = format==='JPEG' ? 'jpeg' : 'jpg'; }
+    setProcessingNote(false);
+
+    const url = URL.createObjectURL(blob);
+    const filename = 'scan_' + Date.now() + '.' + ext;
+    lastResult = { blob, url, filename, size: blob.size, format };
+
+    const thumbWrap = document.getElementById('thumb-wrap');
+    thumbWrap.classList.add('filled','pop');
+    setTimeout(()=>thumbWrap.classList.remove('pop'), 400);
+    document.getElementById('thumb-badge').textContent = format;
+    document.getElementById('thumb-badge').classList.add('show');
+    document.getElementById('thumb-img').src = format!=='PDF' ? url : canvasEl.toDataURL('image/jpeg', 0.6);
+
+    await saveFile(blob, filename);
+    openPreview();
+  }
+
+  function formatBytes(n){ return n > 1024*1024 ? (n/1024/1024).toFixed(2)+' MB' : (n/1024).toFixed(1)+' KB'; }
+
+  function openPreview(){
+    const modal = document.getElementById('preview-modal');
+    document.getElementById('preview-img').src = format!=='PDF' ? lastResult.url : document.getElementById('thumb-img').src;
+    document.getElementById('preview-meta').innerHTML =
+      '<b>'+lastResult.format+'</b> · '+formatBytes(lastResult.size)+' · '+selectedRes.name+' · '+saveDirLabel;
+    const dl = document.getElementById('dl-btn');
+    dl.href = lastResult.url; dl.download = lastResult.filename;
+    modal.classList.add('open');
+  }
+  document.getElementById('close-preview').addEventListener('click', ()=> document.getElementById('preview-modal').classList.remove('open'));
+  document.getElementById('thumb-wrap').addEventListener('click', ()=>{ if(lastResult) openPreview(); });
+
+  resetSplitGuideVisual();
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
